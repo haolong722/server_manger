@@ -1,0 +1,14 @@
+[auth]
+password = 'password123'
+username = 'admin'
+
+[database]
+host = '18.163.227.78'
+name = 'vpn'
+password = '123123'
+port = '3306'
+user = 'vpn'
+
+[port]
+max = 20000
+min = 10000
