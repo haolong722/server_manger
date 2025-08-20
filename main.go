@@ -133,6 +133,9 @@ func main() {
 	// 设置 Gin 路由
 	r := gin.Default()
 
+	// 设置信任的代理（修复警告）
+	r.SetTrustedProxies([]string{"127.0.0.1"}) // 根据需要调整
+
 	// 设置会话中间件
 	store := cookie.NewStore([]byte("secret123"))
 	store.Options(sessions.Options{
@@ -162,6 +165,11 @@ func main() {
 	// 加载 HTML 模板并应用自定义函数
 	r.SetFuncMap(funcMap)
 	r.LoadHTMLGlob("templates/*")
+
+	// 根路径重定向到 /login
+	r.GET("/", func(c *gin.Context) {
+		c.Redirect(http.StatusFound, "/login")
+	})
 
 	// 登录页面
 	r.GET("/login", func(c *gin.Context) {
@@ -526,8 +534,12 @@ func main() {
 	c.AddFunc("*/5 * * * *", checkAndUpdateServers)
 	c.Start()
 
-	// 启动服务器
-	r.Run(":8080")
+	// 启动服务
+	serAddr := viper.GetString("Server.Addr")
+	log.Printf("启动服务于 %s", serAddr)
+	if err := r.Run(serAddr); err != nil {
+		log.Fatal("服务启动失败:", err)
+	}
 }
 
 // 检查并添加列

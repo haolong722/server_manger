@@ -3,7 +3,7 @@ password = 'password123'
 username = 'admin'
 
 [database]
-host = '127.0.0.1'
+host = '18.163.227.78'
 name = 'vpn'
 password = '123123'
 port = '3306'
@@ -12,3 +12,5 @@ user = 'vpn'
 [port]
 max = 20000
 min = 10000
+[server]
+addr = "0.0.0.0:8080"

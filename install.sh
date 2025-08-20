@@ -35,6 +35,19 @@ RAW_URL="https://raw.githubusercontent.com/haolong722/server_manger/main"
 INSTALL_DIR="/usr/local/server-manager"
 CONFIG_FILE="$INSTALL_DIR/config.toml"
 SERVICE_NAME="server-manager"
+SERVICE_USER="servermgr"
+
+# 创建专用用户
+create_service_user() {
+    log_info "创建专用用户 $SERVICE_USER..."
+    if ! id "$SERVICE_USER" >/dev/null 2>&1; then
+        useradd -r -s /bin/false "$SERVICE_USER"
+        if [ $? -ne 0 ]; then
+            log_error "创建用户 $SERVICE_USER 失败"
+            exit 1
+        fi
+    fi
+}
 
 # 检查依赖
 check_dependencies() {
@@ -89,6 +102,15 @@ check_dependencies() {
             exit 1
         fi
     fi
+
+    # 检查 ufw（防火墙）
+    if check_command ufw; then
+        log_info "配置防火墙，开放 8080 端口..."
+        ufw allow 8080
+        ufw --force enable
+    else
+        log_warning "未检测到 ufw，建议手动配置防火墙开放 8080 端口"
+    fi
 }
 
 # 获取用户输入
@@ -112,6 +134,8 @@ get_user_input() {
     MIN_PORT=${MIN_PORT:-1000}
     read -p "请输入最大端口（默认 65535）： " MAX_PORT
     MAX_PORT=${MAX_PORT:-65535}
+    read -p "请输入监听地址（默认 0.0.0.0:8080）： " BIND_ADDR
+    BIND_ADDR=${BIND_ADDR:-0.0.0.0:8080}
 }
 
 # 创建配置文件
@@ -133,13 +157,16 @@ password = "$AUTH_PASS"
 [port]
 min = $MIN_PORT
 max = $MAX_PORT
+
+[server]
+addr = "$BIND_ADDR"
 EOF
     if [ $? -ne 0 ]; then
         log_error "创建配置文件失败"
         exit 1
     fi
     chmod 600 "$CONFIG_FILE"
-    chown nobody:nogroup "$CONFIG_FILE"
+    chown "$SERVICE_USER:$SERVICE_USER" "$CONFIG_FILE"
 }
 
 # 初始化数据库
@@ -156,20 +183,24 @@ init_database() {
 install_project() {
     log_info "下载项目文件..."
     mkdir -p "$INSTALL_DIR/templates"
-    mkdir -p "$INSTALL_DIR/static"
     curl -Ls "$RAW_URL/main.go" -o "$INSTALL_DIR/main.go"
     if [ $? -ne 0 ]; then
-        log_error "下载 main.go 失败"
+        log_error "下载 main.go 失败，请检查 $RAW_URL/main.go"
         exit 1
     fi
     curl -Ls "$RAW_URL/templates/servers.html" -o "$INSTALL_DIR/templates/servers.html"
     if [ $? -ne 0 ]; then
-        log_error "下载 servers.html 失败"
+        log_error "下载 servers.html 失败，请检查 $RAW_URL/templates/servers.html"
+        exit 1
+    fi
+    curl -Ls "$RAW_URL/templates/login.html" -o "$INSTALL_DIR/templates/login.html"
+    if [ $? -ne 0 ]; then
+        log_error "下载 login.html 失败，请检查 $RAW_URL/templates/login.html"
         exit 1
     fi
 
-    # 下载静态资源（直接使用 CDN，无需本地存储）
-    log_info "静态资源将通过 CDN 加载，无需本地下载"
+    # 静态资源通过 CDN 加载
+    log_info "静态资源（Bootstrap、jQuery）将通过 CDN 加载，无需本地下载"
 
     # 编译 Go 程序
     log_info "编译项目..."
@@ -181,7 +212,7 @@ install_project() {
         log_error "编译失败，请检查 Go 环境和代码"
         exit 1
     fi
-    chown -R nobody:nogroup "$INSTALL_DIR"
+    chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
     chmod +x "$INSTALL_DIR/server-manager"
 }
 
@@ -197,15 +228,15 @@ After=network.target mysql.service
 ExecStart=$INSTALL_DIR/server-manager
 WorkingDirectory=$INSTALL_DIR
 Restart=always
-User=nobody
-Group=nogroup
+User=$SERVICE_USER
+Group=$SERVICE_USER
 
 [Install]
 WantedBy=multi-user.target
 EOF
     systemctl daemon-reload
-    systemctl enable $SERVICE_NAME
-    systemctl start $SERVICE_NAME
+    systemctl enable "$SERVICE_NAME"
+    systemctl start "$SERVICE_NAME"
     if [ $? -ne 0 ]; then
         log_error "启动 systemd 服务失败"
         exit 1
@@ -216,16 +247,17 @@ EOF
 main() {
     log_info "开始安装 Server Manager v$VERSION..."
     check_dependencies
+    create_service_user
     get_user_input
     create_config
     init_database
     install_project
     setup_systemd
-    log_info "安装完成！Server Manager 正在运行，访问 http://localhost:8080"
+    log_info "安装完成！Server Manager 正在运行，访问 http://<your-server-ip>:8080"
     log_info "管理面板用户名：$AUTH_USER"
     log_warning "请检查 $CONFIG_FILE 确保配置正确"
     log_warning "建议手动验证 $RAW_URL/install.sh 的内容以确保安全"
-    log_warning "为确保安全，建议配置防火墙，仅开放 8080 端口"
+    log_warning "已开放 8080 端口，建议配置 HTTPS（参考：https://certbot.eff.org）"
 }
 
 main
