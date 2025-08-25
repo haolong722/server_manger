@@ -10,7 +10,9 @@ port = '3306'
 user = 'vpn'
 
 [port]
-max = 20000
+max = 30000
 min = 10000
+
 [server]
-addr = "0.0.0.0:8080"
+addr = '0.0.0.0:8080'
+updateintervalhours = 9

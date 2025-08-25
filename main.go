@@ -72,7 +72,7 @@ func main() {
 	authPassword := viper.GetString("auth.password")
 	minPort = viper.GetInt("port.min")
 	maxPort = viper.GetInt("port.max")
-
+	updateIntervalHours = viper.GetInt("server.updateIntervalHours")
 	// 验证端口范围
 	if minPort >= maxPort {
 		log.Fatal("端口范围无效：最小端口必须小于最大端口")
@@ -418,6 +418,7 @@ func main() {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的间隔"})
 			return
 		}
+		viper.Set("server.updateIntervalHours", interval)
 		updateIntervalHours = interval
 		now := time.Now().Unix()
 		newNextUpdateTime := now + int64(interval*3600)
