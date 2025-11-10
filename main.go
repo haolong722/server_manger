@@ -1,14 +1,17 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
 	"math/rand"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/chromedp/chromedp"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
@@ -530,6 +533,30 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"all_domains": domains})
 	})
 
+	// 添加结构体
+	type ChinaAccessRequest struct {
+		Host string `json:"host" binding:"required"`
+		Port string `json:"port" binding:"required"`
+	}
+
+	// 添加路由
+	r.POST("/check-china-access", func(c *gin.Context) {
+		var req ChinaAccessRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "无效参数"})
+			return
+		}
+
+		hostPort := req.Host + ":" + req.Port
+		accessible, err := isAccessibleFromChina(hostPort)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("检查失败: %v", err)})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"accessible": accessible})
+	})
+
 	// 启动 cron 任务
 	c := cron.New()
 	c.AddFunc("*/5 * * * *", checkAndUpdateServers)
@@ -813,4 +840,63 @@ func authMiddleware(c *gin.Context) {
 		return
 	}
 	c.Next()
+}
+
+// 执行单次检查
+func isAccessibleFromChina(host string) (bool, error) {
+	// 创建 Chrome 实例
+	ctx, cancel := chromedp.NewContext(context.Background())
+	defer cancel()
+
+	// 设置超时
+	ctx, cancel = context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	// 存储表格 HTML
+	var tableHTML string
+
+	// 执行浏览器操作
+	err := chromedp.Run(ctx,
+		// 访问页面
+		chromedp.Navigate("https://tcp.ping.pe/"),
+		// 等待页面主体加载
+		chromedp.WaitVisible(`body`, chromedp.ByQuery),
+		// 等待输入框出现
+		chromedp.WaitVisible(`input[name="query"]`, chromedp.ByQuery, chromedp.NodeVisible),
+		// 输入域名和端口
+		chromedp.SetValue(`input[name="query"]`, host, chromedp.ByQuery),
+		// 调试：确认输入框值
+		chromedp.Evaluate(`document.querySelector('input[name="query"]').value`, &host),
+		// 点击提交按钮
+		chromedp.Click(`input#goButton`, chromedp.NodeVisible, chromedp.ByQuery),
+		// 等待结果表格加载
+		chromedp.WaitVisible(`table#megatable`, chromedp.ByQuery, chromedp.NodeVisible),
+		// 等待 AJAX 更新（最多10秒）
+		chromedp.Sleep(10*time.Second),
+		// 提取表格 HTML
+		chromedp.OuterHTML(`table#megatable`, &tableHTML, chromedp.ByQuery),
+	)
+	if err != nil {
+		return false, fmt.Errorf("浏览器操作失败: %v", err)
+	}
+
+	// 解析表格
+	lines := strings.Split(tableHTML, "\n")
+	for i, line := range lines {
+		if strings.Contains(strings.ToLower(line), "china") {
+			// 查找状态列（在同一行或下一行的 <span>）
+			for j := i; j < len(lines); j++ {
+				nextLine := strings.ToLower(lines[j])
+				if strings.Contains(nextLine, "tcp-") && strings.Contains(nextLine, "-result") {
+					log.Printf("中国行内容: %s, 状态行: %s", line, nextLine)
+					if strings.Contains(nextLine, "successful") {
+						return true, nil
+					}
+					break
+				}
+			}
+		}
+	}
+
+	return false, fmt.Errorf("未找到中国的结果或状态不可访问")
 }

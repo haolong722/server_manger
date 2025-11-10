@@ -57,6 +57,14 @@
             background-color: #218838;
             border-color: #218838;
         }
+        .btn-warning {
+            background-color: #ffc107;
+            border-color: #ffc107;
+        }
+        .btn-warning:hover {
+            background-color: #e0a800;
+            border-color: #e0a800;
+        }
         .form-control-sm {
             border-radius: 4px;
             border: 1px solid #ced4da;
@@ -111,6 +119,15 @@
         .badge-not-in-use {
             background-color: #6c757d;
         }
+        .badge-checking {
+            background-color: #6c757d;
+        }
+        .badge-success {
+            background-color: #28a745;
+        }
+        .badge-failure {
+            background-color: #dc3545;
+        }
     </style>
 </head>
 <body>
@@ -157,10 +174,11 @@
                     <th>域名数（总计/可用）</th>
                     <th>下次更新时间</th>
                     <th>最后更新状态</th>
+                    <th>中国访问状态</th>
                     <th>操作</th>
                 </tr>
                 </thead>
-                <tbody>
+                <tbody id="server-list">
                 {{range .Servers}}
                 <tr data-table="{{.TableName}}" data-id="{{.ID}}">
                     <td class="name">{{.Name}}</td>
@@ -169,9 +187,11 @@
                     <td class="domain-count">{{formatDomainCount .DomainTotal .DomainAvailable}}</td>
                     <td class="next-update-time">{{formatUnixTime .NextUpdateTime}}</td>
                     <td class="last-update-status">{{.LastUpdateStatus}}</td>
+                    <td class="china-status"><span class="badge badge-checking">检查中</span></td>
                     <td>
                         <button class="btn btn-primary btn-sm update-btn" data-table="{{.TableName}}" data-id="{{.ID}}">立即更新</button>
                         <button class="btn btn-info btn-sm show-domains-btn" data-table="{{.TableName}}" data-id="{{.ID}}">显示域名</button>
+                        <button class="btn btn-warning btn-sm test-btn" data-host="{{.Host}}" data-port="{{.Port}}">转到新窗口测试</button>
                     </td>
                 </tr>
                 {{end}}
@@ -241,9 +261,42 @@
         return total + "/" + available;
     }
 
+    // 刷新服务器列表
+    function refreshServerList() {
+        $.ajax({
+            url: "/servers",
+            method: "GET",
+            success: function(response) {
+                var tbody = $("#server-list");
+                tbody.empty();
+                response.servers.forEach(function(server) {
+                    var row = `<tr data-table="${server.TableName}" data-id="${server.ID}">
+                        <td class="name">${server.Name}</td>
+                        <td class="port">${server.Port}</td>
+                        <td class="host">${server.Host}</td>
+                        <td class="domain-count">${formatDomainCount(server.DomainTotal, server.DomainAvailable)}</td>
+                        <td class="next-update-time">${formatUnixTime(server.NextUpdateTime)}</td>
+                        <td class="last-update-status">${server.LastUpdateStatus}</td>
+                        <td class="china-status"><span class="badge badge-checking">检查中</span></td>
+                        <td>
+                            <button class="btn btn-primary btn-sm update-btn" data-table="${server.TableName}" data-id="${server.ID}">立即更新</button>
+                            <button class="btn btn-info btn-sm show-domains-btn" data-table="${server.TableName}" data-id="${server.ID}">显示域名</button>
+                            <button class="btn btn-warning btn-sm test-btn" data-host="${server.Host}" data-port="${server.Port}">转到新窗口测试</button>
+                        </td>
+                    </tr>`;
+                    tbody.append(row);
+                });
+            },
+            error: function(xhr) {
+                console.error("Refresh server list failed:", xhr.responseJSON);
+                alert("刷新服务器列表失败：" + (xhr.responseJSON ? xhr.responseJSON.error : "未知错误"));
+            }
+        });
+    }
+
     $(document).ready(function() {
         // 显示域名列表
-        $(".show-domains-btn").click(function() {
+        $(document).on("click", ".show-domains-btn", function() {
             var button = $(this);
             var table = button.data("table");
             var id = button.data("id");
@@ -280,7 +333,7 @@
         });
 
         // 立即更新
-        $(".update-btn").click(function() {
+        $(document).on("click", ".update-btn", function() {
             var button = $(this);
             var table = button.data("table");
             var id = button.data("id");
@@ -382,6 +435,55 @@
                 }
             });
         });
+
+        // 新增功能：定时轮询中国访问状态（每60秒）
+        function pollChinaAccess() {
+            // // 先刷新服务器列表
+            // refreshServerList();
+            // 再检查中国访问状态
+            $('tr[data-id]').each(function() {
+                var row = $(this);
+                var host = row.find('.host').text().trim();
+                var port = row.find('.port').text().trim();
+                if (host && port) {
+                    $.ajax({
+                        url: "/check-china-access",
+                        method: "POST",
+                        contentType: "application/json",
+                        data: JSON.stringify({ host: host, port: port }),
+                        success: function(response) {
+                            var statusElem = row.find('.china-status');
+                            if (response.accessible) {
+                                statusElem.html('<span class="badge badge-success">成功</span>');
+                            } else {
+                                statusElem.html('<span class="badge badge-failure">失败</span>');
+                            }
+                        },
+                        error: function(xhr) {
+                            console.error("Check failed for " + host + ":" + port, xhr);
+                            row.find('.china-status').html('<span class="badge badge-failure">检查失败</span>');
+                        }
+                    });
+                }
+            });
+        }
+
+        // 新增功能：转到新窗口测试
+        $(document).on("click", ".test-btn", function() {
+            var button = $(this);
+            var host = button.data("host");
+            var port = button.data("port");
+            if (host && port) {
+                var url = `https://tcp.ping.pe/${host}:${port}`;
+                window.open(url, '_blank');
+            } else {
+                alert("无效的主机或端口");
+            }
+        });
+
+        // 初始调用一次，然后定时轮询
+        pollChinaAccess();
+        setInterval(pollChinaAccess, 600000); // 每60秒轮询一次
     });
 </script>
 </body>

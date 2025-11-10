@@ -3,11 +3,11 @@ password = 'password123'
 username = 'admin'
 
 [database]
-host = '18.163.227.78'
-name = 'vpn'
-password = '123123'
+host = '18.167.72.137'
+name = 'test'
+password = '123'
 port = '3306'
-user = 'vpn'
+user = 't1'
 
 [port]
 max = 30000
@@ -15,4 +15,4 @@ min = 10000
 
 [server]
 addr = '0.0.0.0:8080'
-updateintervalhours = 9
+updateintervalhours = 24
